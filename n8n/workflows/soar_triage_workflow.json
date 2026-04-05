@@ -1,0 +1,552 @@
+{
+  "name": "SOAR Triage Pipeline — Wazuh → VirusTotal → Azure AD → TheHive",
+  "nodes": [
+
+    {
+      "id": "node_webhook",
+      "name": "Wazuh Alert Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 400],
+      "webhookId": "wazuh-triage",
+      "parameters": {
+        "path": "wazuh-triage",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "responseCode": 200,
+        "options": {
+          "rawBody": false
+        }
+      }
+    },
+
+    {
+      "id": "node_extract_fields",
+      "name": "Extract & Validate Alert Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [460, 400],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "alert_id",
+              "value": "={{ $json.alert_id }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "source_ip",
+              "value": "={{ $json.event.source_ip }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "username",
+              "value": "={{ $json.event.username }}",
+              "type": "string"
+            },
+            {
+              "id": "f4",
+              "name": "rule_id",
+              "value": "={{ $json.rule.id }}",
+              "type": "string"
+            },
+            {
+              "id": "f5",
+              "name": "rule_description",
+              "value": "={{ $json.rule.description }}",
+              "type": "string"
+            },
+            {
+              "id": "f6",
+              "name": "severity",
+              "value": "={{ $json.rule.severity }}",
+              "type": "string"
+            },
+            {
+              "id": "f7",
+              "name": "soar_priority",
+              "value": "={{ $json.triage.soar_priority }}",
+              "type": "string"
+            },
+            {
+              "id": "f8",
+              "name": "agent_name",
+              "value": "={{ $json.agent.name }}",
+              "type": "string"
+            },
+            {
+              "id": "f9",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp }}",
+              "type": "string"
+            },
+            {
+              "id": "f10",
+              "name": "mitre_ids",
+              "value": "={{ $json.rule.mitre.join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "f11",
+              "name": "is_post_auth_success",
+              "value": "={{ $json.triage.is_post_auth_success }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f12",
+              "name": "is_brute_force",
+              "value": "={{ $json.triage.is_brute_force }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f13",
+              "name": "is_geo_anomaly",
+              "value": "={{ $json.triage.is_geo_anomaly }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f14",
+              "name": "full_log",
+              "value": "={{ $json.event.full_log }}",
+              "type": "string"
+            },
+            {
+              "id": "f15",
+              "name": "dest_host",
+              "value": "={{ $json.event.dest_host }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "node_vt_ip",
+      "name": "VirusTotal — IP Reputation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 240],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.virustotal.com/api/v3/ip_addresses/{{ $json.source_ip }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          },
+          "timeout": 15000
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-apikey",
+              "value": "={{ $credentials.httpHeaderAuthCredentials.value }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vt_api_key",
+          "name": "VirusTotal API Key"
+        }
+      }
+    },
+
+    {
+      "id": "node_vt_extract",
+      "name": "Parse VirusTotal Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [940, 240],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "vt1",
+              "name": "vt_malicious_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.malicious }}",
+              "type": "number"
+            },
+            {
+              "id": "vt2",
+              "name": "vt_suspicious_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.suspicious }}",
+              "type": "number"
+            },
+            {
+              "id": "vt3",
+              "name": "vt_harmless_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.harmless }}",
+              "type": "number"
+            },
+            {
+              "id": "vt4",
+              "name": "vt_country",
+              "value": "={{ $json.data.attributes.country }}",
+              "type": "string"
+            },
+            {
+              "id": "vt5",
+              "name": "vt_asn",
+              "value": "={{ $json.data.attributes.asn }}",
+              "type": "string"
+            },
+            {
+              "id": "vt6",
+              "name": "vt_as_owner",
+              "value": "={{ $json.data.attributes.as_owner }}",
+              "type": "string"
+            },
+            {
+              "id": "vt7",
+              "name": "vt_reputation",
+              "value": "={{ $json.data.attributes.reputation }}",
+              "type": "number"
+            },
+            {
+              "id": "vt8",
+              "name": "vt_link",
+              "value": "=https://www.virustotal.com/gui/ip-address/{{ $('Extract & Validate Alert Fields').item.json.source_ip }}/detection",
+              "type": "string"
+            },
+            {
+              "id": "vt9",
+              "name": "vt_verdict",
+              "value": "={{ $json.data.attributes.last_analysis_stats.malicious > 5 ? 'MALICIOUS' : $json.data.attributes.last_analysis_stats.malicious > 0 ? 'SUSPICIOUS' : 'CLEAN' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "node_aad_token",
+      "name": "Azure AD — Get OAuth2 Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 560],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $vars.AZURE_TENANT_ID }}/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "grant_type",    "value": "client_credentials" },
+            { "name": "client_id",     "value": "={{ $vars.AZURE_CLIENT_ID }}" },
+            { "name": "client_secret", "value": "={{ $vars.AZURE_CLIENT_SECRET }}" },
+            { "name": "scope",         "value": "https://graph.microsoft.com/.default" }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      }
+    },
+
+    {
+      "id": "node_aad_user",
+      "name": "Azure AD — Lookup User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [940, 560],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.microsoft.com/v1.0/users/{{ $('Extract & Validate Alert Fields').item.json.username }}@{{ $vars.AZURE_DOMAIN }}?$select=displayName,userPrincipalName,accountEnabled,department,jobTitle,lastPasswordChangeDateTime,signInActivity,riskLevel,riskState",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+
+    {
+      "id": "node_aad_signin",
+      "name": "Azure AD — Recent Sign-In Logs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1180, 560],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.microsoft.com/v1.0/auditLogs/signIns?$filter=userPrincipalName eq '{{ $('Extract & Validate Alert Fields').item.json.username }}@{{ $vars.AZURE_DOMAIN }}'&$top=5&$orderby=createdDateTime desc",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Azure AD — Get OAuth2 Token').item.json.access_token }}"
+            }
+          ]
+        },
+        "options": { "timeout": 10000 }
+      }
+    },
+
+    {
+      "id": "node_merge_intel",
+      "name": "Merge All Intelligence",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1440, 400],
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      }
+    },
+
+    {
+      "id": "node_build_report",
+      "name": "Build Triage Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 400],
+      "parameters": {
+        "jsCode": "// ── Pull data from all branches ──────────────────────────────────────────\nconst alert   = $('Extract & Validate Alert Fields').item.json;\nconst vt      = $('Parse VirusTotal Response').item.json;\nconst aadUser = $('Azure AD — Lookup User').item.json;\nconst aadLogs = $('Azure AD — Recent Sign-In Logs').item.json;\n\n// ── Build sign-in history table ───────────────────────────────────────────\nconst signInTable = (aadLogs.value || []).map((s, i) => {\n  return `| ${i + 1} | ${s.createdDateTime} | ${s.ipAddress} | ${s.location?.city}, ${s.location?.countryOrRegion} | ${s.status?.errorCode === 0 ? '✅ Success' : `❌ Fail (${s.status?.failureReason})`} |`;\n}).join('\\n') || '| — | No recent sign-ins found | — | — | — |';\n\n// ── Calculate risk score ─────────────────────────────────────────────────\nlet riskScore = 0;\nif (vt.vt_malicious_count > 5)        riskScore += 40;\nelse if (vt.vt_malicious_count > 0)   riskScore += 20;\nif (alert.is_post_auth_success)       riskScore += 30;\nif (alert.is_geo_anomaly)             riskScore += 15;\nif (aadUser.riskLevel === 'high')     riskScore += 25;\nif (aadUser.riskLevel === 'medium')   riskScore += 10;\nif (!aadUser.accountEnabled)          riskScore -= 10; // disabled acct, lower urgency\nriskScore = Math.min(100, Math.max(0, riskScore));\n\nconst riskLabel = riskScore >= 75 ? '🔴 CRITICAL' \n                : riskScore >= 50 ? '🟠 HIGH'\n                : riskScore >= 25 ? '🟡 MEDIUM'\n                : '🟢 LOW';\n\n// ── TheHive Severity mapping (1=low, 2=med, 3=high, 4=critical) ──────────\nconst hiveSeverity = riskScore >= 75 ? 4 \n                   : riskScore >= 50 ? 3\n                   : riskScore >= 25 ? 2 : 1;\n\n// ── MITRE ATT&CK Tags ─────────────────────────────────────────────────────\nconst mitreTags = (alert.mitre_ids || '').split(', ')\n  .filter(Boolean)\n  .map(id => `T:${id}`);\n\n// ── Build TheHive case description (Markdown) ─────────────────────────────\nconst description = `\n## 🚨 Automated SOC Triage Report\n> Generated by SOAR Pipeline at ${new Date().toISOString()}\n\n---\n\n### Alert Summary\n| Field | Value |\n|-------|-------|\n| **Alert ID** | \\`${alert.alert_id}\\` |\n| **Wazuh Rule** | \\`${alert.rule_id}\\` — ${alert.rule_description} |\n| **Severity** | ${alert.severity.toUpperCase()} |\n| **SOAR Priority** | **${alert.soar_priority}** |\n| **Timestamp** | ${alert.timestamp} |\n| **Affected Host** | \\`${alert.dest_host}\\` (Agent: ${alert.agent_name}) |\n| **Risk Score** | **${riskScore}/100** — ${riskLabel} |\n\n---\n\n### 🌐 Source IP Intelligence — ${alert.source_ip}\n| Vendor Verdicts | Suspicious | Harmless | Country | ASN | Owner |\n|----------------|-----------|---------|---------|-----|-------|\n| **${vt.vt_malicious_count} MALICIOUS** | ${vt.vt_suspicious_count} | ${vt.vt_harmless_count} | ${vt.vt_country} | AS${vt.vt_asn} | ${vt.vt_as_owner} |\n\n**VirusTotal Verdict: ${vt.vt_verdict}**\n\n🔗 [View on VirusTotal](${vt.vt_link})\n\n---\n\n### 👤 Azure AD — User Profile: \\`${alert.username}\\`\n| Field | Value |\n|-------|-------|\n| **Display Name** | ${aadUser.displayName || 'Not found in AAD'} |\n| **UPN** | ${aadUser.userPrincipalName || 'N/A'} |\n| **Department** | ${aadUser.department || 'N/A'} |\n| **Job Title** | ${aadUser.jobTitle || 'N/A'} |\n| **Account Enabled** | ${aadUser.accountEnabled ? '✅ Yes' : '🚫 **DISABLED**'} |\n| **AAD Risk Level** | ${aadUser.riskLevel || 'none'} |\n| **AAD Risk State** | ${aadUser.riskState || 'none'} |\n| **Last Password Change** | ${aadUser.lastPasswordChangeDateTime || 'N/A'} |\n\n---\n\n### 📋 Recent Sign-In History (Last 5)\n| # | Time | IP | Location | Result |\n|---|------|----|----------|--------|\n${signInTable}\n\n---\n\n### 🎯 MITRE ATT&CK Techniques\n\\`${alert.mitre_ids || 'N/A'}\\`\n\n---\n\n### 📝 Raw Alert Log\n\\`\\`\\`\n${alert.full_log}\n\\`\\`\\`\n\n---\n\n### ⚡ Recommended Analyst Actions\n${alert.is_post_auth_success ? '1. **URGENT**: Confirm if login was legitimate with the user directly\\n2. Force password reset immediately if unauthorized\\n3. Review all session activity post-login\\n' : ''}\n${vt.vt_verdict === 'MALICIOUS' ? '4. **Block source IP** at perimeter firewall (EDR enforcement recommended)\\n5. Check for lateral movement from this IP in Wazuh\\n' : ''}\n${alert.is_geo_anomaly ? '6. **Geo-anomaly**: Verify travel or VPN use with the user\\n' : ''}\n7. Review all other alerts from \\`${alert.source_ip}\\` in the last 24 hours\n8. Check if same IP appears in threat intel feeds (MISP, OTX)\n`;\n\nreturn [{\n  json: {\n    // TheHive case fields\n    title: `[${alert.soar_priority}] ${alert.rule_description} — ${alert.source_ip} → ${alert.agent_name}`,\n    description,\n    severity: hiveSeverity,\n    tlp: 2,  // AMBER\n    pap: 2,  // AMBER  \n    tags: [\n      `rule:${alert.rule_id}`,\n      `severity:${alert.severity}`,\n      `src_ip:${alert.source_ip}`,\n      `user:${alert.username}`,\n      `host:${alert.agent_name}`,\n      `vt:${vt.vt_verdict}`,\n      `priority:${alert.soar_priority}`,\n      ...mitreTags,\n    ],\n    assignee: alert.soar_priority === 'P1' ? 'tier2-analyst' : 'tier1-analyst',\n    // Pass through for next nodes\n    alert_id:   alert.alert_id,\n    source_ip:  alert.source_ip,\n    username:   alert.username,\n    risk_score: riskScore,\n    vt_verdict: vt.vt_verdict,\n    is_post_auth_success: alert.is_post_auth_success,\n  }\n}];\n"
+      }
+    },
+
+    {
+      "id": "node_thehive_case",
+      "name": "TheHive — Create Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1920, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://thehive:9000/api/v1/case",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"title\": \"{{ $json.title }}\",\n  \"description\": \"{{ $json.description }}\",\n  \"severity\": {{ $json.severity }},\n  \"startDate\": \"{{ $now.toISO() }}\",\n  \"tlp\": {{ $json.tlp }},\n  \"pap\": {{ $json.pap }},\n  \"tags\": {{ JSON.stringify($json.tags) }},\n  \"assignee\": \"{{ $json.assignee }}\",\n  \"status\": \"New\",\n  \"source\": \"Wazuh SOAR Pipeline\",\n  \"sourceRef\": \"{{ $json.alert_id }}\"\n}",
+        "options": { "timeout": 15000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "thehive_api_key",
+          "name": "TheHive API Key"
+        }
+      }
+    },
+
+    {
+      "id": "node_thehive_observable_ip",
+      "name": "TheHive — Add IP Observable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2160, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://thehive:9000/api/v1/case/{{ $('TheHive — Create Case').item.json._id }}/observable",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"dataType\": \"ip\",\n  \"data\": \"{{ $('Build Triage Report').item.json.source_ip }}\",\n  \"message\": \"Source IP from Wazuh alert — VirusTotal verdict: {{ $('Build Triage Report').item.json.vt_verdict }}\",\n  \"tlp\": 2,\n  \"ioc\": {{ $('Build Triage Report').item.json.vt_verdict === 'MALICIOUS' }},\n  \"tags\": [\"source-ip\", \"vt:{{ $('Build Triage Report').item.json.vt_verdict.toLowerCase() }}\"]\n}",
+        "options": { "timeout": 10000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "thehive_api_key",
+          "name": "TheHive API Key"
+        }
+      }
+    },
+
+    {
+      "id": "node_thehive_observable_user",
+      "name": "TheHive — Add Username Observable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2160, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://thehive:9000/api/v1/case/{{ $('TheHive — Create Case').item.json._id }}/observable",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"dataType\": \"username\",\n  \"data\": \"{{ $('Build Triage Report').item.json.username }}\",\n  \"message\": \"Target account from authentication event\",\n  \"tlp\": 2,\n  \"ioc\": false,\n  \"tags\": [\"target-user\", \"azure-ad\"]\n}",
+        "options": { "timeout": 10000 }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "thehive_api_key",
+          "name": "TheHive API Key"
+        }
+      }
+    },
+
+    {
+      "id": "node_p1_check",
+      "name": "P1 Priority?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Build Triage Report').item.json.risk_score }}",
+              "rightValue": 70,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+
+    {
+      "id": "node_slack_p1",
+      "name": "Slack — P1 Escalation Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2640, 280],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"text\": \"🚨 *P1 Security Incident* — Immediate Action Required\",\n  \"attachments\": [{\n    \"color\": \"#FF0000\",\n    \"fields\": [\n      { \"title\": \"Risk Score\", \"value\": \"{{ $('Build Triage Report').item.json.risk_score }}/100\", \"short\": true },\n      { \"title\": \"Source IP\", \"value\": \"{{ $('Build Triage Report').item.json.source_ip }}\", \"short\": true },\n      { \"title\": \"VT Verdict\", \"value\": \"{{ $('Build Triage Report').item.json.vt_verdict }}\", \"short\": true },\n      { \"title\": \"Target User\", \"value\": \"{{ $('Build Triage Report').item.json.username }}\", \"short\": true },\n      { \"title\": \"TheHive Case\", \"value\": \"http://localhost:9000/cases\", \"short\": false }\n    ]\n  }]\n}",
+        "options": { "timeout": 5000 }
+      }
+    },
+
+    {
+      "id": "node_log_success",
+      "name": "Log Pipeline Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [2640, 520],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "l1",
+              "name": "pipeline_status",
+              "value": "completed",
+              "type": "string"
+            },
+            {
+              "id": "l2",
+              "name": "thehive_case_id",
+              "value": "={{ $('TheHive — Create Case').item.json._id }}",
+              "type": "string"
+            },
+            {
+              "id": "l3",
+              "name": "completed_at",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+
+  ],
+
+  "connections": {
+    "Wazuh Alert Intake": {
+      "main": [[{ "node": "Extract & Validate Alert Fields", "type": "main", "index": 0 }]]
+    },
+    "Extract & Validate Alert Fields": {
+      "main": [[
+        { "node": "VirusTotal — IP Reputation",      "type": "main", "index": 0 },
+        { "node": "Azure AD — Get OAuth2 Token",     "type": "main", "index": 0 }
+      ]]
+    },
+    "VirusTotal — IP Reputation": {
+      "main": [[{ "node": "Parse VirusTotal Response", "type": "main", "index": 0 }]]
+    },
+    "Azure AD — Get OAuth2 Token": {
+      "main": [[{ "node": "Azure AD — Lookup User", "type": "main", "index": 0 }]]
+    },
+    "Azure AD — Lookup User": {
+      "main": [[{ "node": "Azure AD — Recent Sign-In Logs", "type": "main", "index": 0 }]]
+    },
+    "Parse VirusTotal Response": {
+      "main": [[{ "node": "Merge All Intelligence", "type": "main", "index": 0 }]]
+    },
+    "Azure AD — Recent Sign-In Logs": {
+      "main": [[{ "node": "Merge All Intelligence", "type": "main", "index": 1 }]]
+    },
+    "Merge All Intelligence": {
+      "main": [[{ "node": "Build Triage Report", "type": "main", "index": 0 }]]
+    },
+    "Build Triage Report": {
+      "main": [[{ "node": "TheHive — Create Case", "type": "main", "index": 0 }]]
+    },
+    "TheHive — Create Case": {
+      "main": [[
+        { "node": "TheHive — Add IP Observable",       "type": "main", "index": 0 },
+        { "node": "TheHive — Add Username Observable",  "type": "main", "index": 0 }
+      ]]
+    },
+    "TheHive — Add IP Observable": {
+      "main": [[{ "node": "P1 Priority?", "type": "main", "index": 0 }]]
+    },
+    "TheHive — Add Username Observable": {
+      "main": [[{ "node": "P1 Priority?", "type": "main", "index": 0 }]]
+    },
+    "P1 Priority?": {
+      "main": [
+        [{ "node": "Slack — P1 Escalation Alert", "type": "main", "index": 0 }],
+        [{ "node": "Log Pipeline Success",          "type": "main", "index": 0 }]
+      ]
+    },
+    "Slack — P1 Escalation Alert": {
+      "main": [[{ "node": "Log Pipeline Success", "type": "main", "index": 0 }]]
+    }
+  },
+
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {},
+  "versionId": "soar-v1.0.0",
+  "triggerCount": 1,
+  "active": true
+}

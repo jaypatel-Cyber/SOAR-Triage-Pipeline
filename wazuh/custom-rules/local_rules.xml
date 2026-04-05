@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ============================================================
+  Custom Wazuh Rules — SOAR Triage Pipeline
+  Author: Jay Patel
+  ============================================================
+
+  These rules detect:
+    1. SSH brute-force attacks (multiple failed logins)
+    2. Successful login AFTER failed attempts (credential stuffing)
+    3. Windows RDP brute force
+    4. Login from suspicious geolocation
+    5. Login outside business hours
+    6. Local account privilege escalation post-login
+
+  Rule IDs: 100100-100200 (custom range)
+  Severity levels: 1 (lowest) → 15 (highest)
+  Level ≥ 10 triggers the n8n SOAR webhook integration
+-->
+
+<group name="soar_triage,authentication,">
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100100: SSH Brute Force (5 failures in 2 min)
+       Groups under existing Wazuh rule 5712 (sshd auth fail)
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100100" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>5712</if_matched_sid>
+    <same_source_ip />
+    <description>SSH Brute Force: $(srcip) fired $(occurrence) failures in 2 minutes against $(dstuser)</description>
+    <group>authentication_failures,brute_force,soar_trigger</group>
+    <mitre>
+      <id>T1110.001</id>  <!-- Brute Force: Password Guessing -->
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100101: Successful SSH login AFTER brute force
+       This is the "breakin confirmed" alert — highest priority
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100101" level="14">
+    <if_matched_sid>100100</if_matched_sid>
+    <if_sid>5715</if_sid>  <!-- sshd: Accepted password -->
+    <same_source_ip />
+    <description>CRITICAL: Successful SSH login from $(srcip) after brute force — possible credential stuffing or compromise of $(dstuser)</description>
+    <group>authentication_success,brute_force,credential_stuffing,soar_trigger</group>
+    <mitre>
+      <id>T1110.004</id>  <!-- Credential Stuffing -->
+      <id>T1078</id>       <!-- Valid Accounts -->
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100102: Windows RDP Brute Force
+       Groups under Wazuh rule 60122 (Win audit failure)
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100102" level="10" frequency="10" timeframe="60">
+    <if_matched_sid>60122</if_matched_sid>
+    <same_source_ip />
+    <description>RDP Brute Force: $(srcip) made $(occurrence) failed Windows login attempts in 60 seconds against $(dstuser)</description>
+    <group>authentication_failures,brute_force,windows,soar_trigger</group>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1021.001</id>  <!-- Remote Services: RDP -->
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100103: RDP Login SUCCESS after brute force
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100103" level="14">
+    <if_matched_sid>100102</if_matched_sid>
+    <if_sid>60106</if_sid>  <!-- Windows: Logon Success (4624) -->
+    <same_source_ip />
+    <description>CRITICAL: RDP login success from $(srcip) after brute force — account $(dstuser) may be compromised</description>
+    <group>authentication_success,brute_force,windows,rdp,soar_trigger</group>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+      <id>T1021.001</id>
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100104: Login from TOR exit node or known bad IP
+       Triggered when GeoIP flags a suspicious country + auth
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100104" level="12">
+    <if_sid>5715,60106</if_sid>  <!-- SSH or RDP success -->
+    <srcgeoip_not_match>^(US|CA|GB|AU|NZ)$</srcgeoip_not_match>
+    <description>Suspicious Geolocation Login: $(dstuser) authenticated from $(srcip) in $(srcgeoip_country_name) — outside expected countries</description>
+    <group>authentication_success,geo_anomaly,soar_trigger</group>
+    <mitre>
+      <id>T1078</id>
+      <id>T1571</id>  <!-- Non-Standard Port -->
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100105: After-hours login (outside 08:00-18:00 UTC)
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100105" level="10">
+    <if_sid>5715,60106</if_sid>
+    <time>18:00 - 08:00</time>
+    <description>After-Hours Login: $(dstuser) authenticated from $(srcip) outside business hours ($(timestamp))</description>
+    <group>authentication_success,after_hours,soar_trigger</group>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100106: Privilege escalation shortly after login
+       sudo/su execution within 5 min of login event
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100106" level="13" timeframe="300">
+    <if_matched_sid>5715</if_matched_sid>
+    <if_sid>5402</if_sid>  <!-- Wazuh: sudo execution -->
+    <same_user />
+    <description>Privilege Escalation Post-Login: $(user) ran sudo within 5 minutes of SSH login from $(srcip)</description>
+    <group>privilege_escalation,soar_trigger</group>
+    <mitre>
+      <id>T1078</id>
+      <id>T1548.003</id>  <!-- Abuse Elevation Control: Sudo -->
+    </mitre>
+  </rule>
+
+  <!-- ─────────────────────────────────────────────────────
+       RULE 100107: Multiple accounts targeted from same IP
+       Detects password spraying (1 password, many users)
+  ───────────────────────────────────────────────────────── -->
+  <rule id="100107" level="12" frequency="5" timeframe="180">
+    <if_matched_sid>5712,60122</if_matched_sid>
+    <same_source_ip />
+    <different_dstuser />
+    <description>Password Spray Detected: $(srcip) attempted login against $(occurrence) different accounts in 3 minutes</description>
+    <group>authentication_failures,password_spray,soar_trigger</group>
+    <mitre>
+      <id>T1110.003</id>  <!-- Brute Force: Password Spraying -->
+    </mitre>
+  </rule>
+
+</group>

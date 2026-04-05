@@ -1,0 +1,238 @@
+version: "3.9"
+
+# ============================================================
+#  SOAR Triage Pipeline — Full Stack
+#  Services: Wazuh (SIEM) + n8n (SOAR) + TheHive (IR)
+# ============================================================
+
+networks:
+  soar-net:
+    driver: bridge
+
+volumes:
+  wazuh-api-configuration:
+  wazuh-authd-pass:
+  wazuh-config:
+  wazuh-custom-integrations:
+  wazuh-logs:
+  wazuh-queue:
+  wazuh-var-multigroups:
+  wazuh-integrations:
+  wazuh-active-response:
+  wazuh-agentless:
+  wazuh-wodles:
+  filebeat-etc:
+  filebeat-var:
+  wazuh-indexer-data:
+  thehive-data:
+  thehive-index:
+  cassandra-data:
+  n8n-data:
+
+services:
+
+  # ─────────────────────────────────────────────
+  #  WAZUH INDEXER  (OpenSearch)
+  # ─────────────────────────────────────────────
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.7.3
+    container_name: wazuh.indexer
+    hostname: wazuh.indexer
+    restart: always
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    networks:
+      - soar-net
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/certs/root-ca.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.key
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/certs/wazuh.indexer.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/certs/admin.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/certs/admin-key.pem
+      - ./wazuh/config/wazuh.indexer.yml:/usr/share/wazuh-indexer/opensearch.yml
+      - ./wazuh/config/internal_users.yml:/usr/share/wazuh-indexer/opensearch-security/internal_users.yml
+
+  # ─────────────────────────────────────────────
+  #  WAZUH MANAGER  (SIEM Core)
+  # ─────────────────────────────────────────────
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.7.3
+    container_name: wazuh.manager
+    hostname: wazuh.manager
+    restart: always
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    environment:
+      - INDEXER_URL=https://wazuh.indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=S0ar@Lab#2024!
+    ports:
+      - "1514:1514"       # Agent communication
+      - "1515:1515"       # Agent enrollment
+      - "514:514/udp"     # Syslog
+      - "55000:55000"     # Wazuh REST API
+    networks:
+      - soar-net
+    volumes:
+      - wazuh-api-configuration:/var/ossec/api/configuration
+      - wazuh-authd-pass:/var/ossec/etc/authd.pass
+      - wazuh-config:/var/ossec/etc
+      - wazuh-logs:/var/ossec/logs
+      - wazuh-queue:/var/ossec/queue
+      - wazuh-var-multigroups:/var/ossec/var/multigroups
+      - wazuh-integrations:/var/ossec/integrations
+      - wazuh-active-response:/var/ossec/active-response/bin
+      - wazuh-agentless:/var/ossec/agentless
+      - wazuh-wodles:/var/ossec/wodles
+      - filebeat-etc:/etc/filebeat
+      - filebeat-var:/var/lib/filebeat
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      - ./wazuh/config/wazuh.manager.conf:/wazuh-config-mount/etc/ossec.conf
+      # Custom rules & integration
+      - ./wazuh/custom-rules/local_rules.xml:/var/ossec/etc/rules/local_rules.xml
+      - ./wazuh/integration/custom-n8n:/var/ossec/integrations/custom-n8n
+      - ./wazuh/integration/custom-n8n.py:/var/ossec/integrations/custom-n8n.py
+    depends_on:
+      - wazuh.indexer
+
+  # ─────────────────────────────────────────────
+  #  WAZUH DASHBOARD  (Kibana-like UI)
+  # ─────────────────────────────────────────────
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.7.3
+    container_name: wazuh.dashboard
+    hostname: wazuh.dashboard
+    restart: always
+    ports:
+      - "443:5601"
+    networks:
+      - soar-net
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=S0ar@Lab#2024!
+    volumes:
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./wazuh/config/wazuh.dashboard.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+    depends_on:
+      - wazuh.manager
+      - wazuh.indexer
+
+  # ─────────────────────────────────────────────
+  #  n8n  (SOAR / Automation Engine)
+  # ─────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    hostname: n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    networks:
+      - soar-net
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://n8n:5678/
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=SOARpass123
+      - GENERIC_TIMEZONE=UTC
+      - TZ=UTC
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+  # ─────────────────────────────────────────────
+  #  CASSANDRA  (TheHive backend database)
+  # ─────────────────────────────────────────────
+  cassandra:
+    image: cassandra:4.1
+    container_name: cassandra
+    hostname: cassandra
+    restart: always
+    networks:
+      - soar-net
+    environment:
+      - CASSANDRA_CLUSTER_NAME=thehive
+      - MAX_HEAP_SIZE=1G
+      - HEAP_NEWSIZE=256M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ─────────────────────────────────────────────
+  #  ELASTICSEARCH  (TheHive index)
+  # ─────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.15
+    container_name: elasticsearch
+    hostname: elasticsearch
+    restart: always
+    networks:
+      - soar-net
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - thehive-index:/usr/share/elasticsearch/data
+
+  # ─────────────────────────────────────────────
+  #  THEHIVE  (Incident Response Platform)
+  # ─────────────────────────────────────────────
+  thehive:
+    image: strangebee/thehive:5.2
+    container_name: thehive
+    hostname: thehive
+    restart: always
+    ports:
+      - "9000:9000"
+    networks:
+      - soar-net
+    environment:
+      - JVM_OPTS=-Xms1g -Xmx2g
+    volumes:
+      - thehive-data:/opt/thp/thehive/data
+      - ./thehive/config/application.conf:/etc/thehive/application.conf
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_started

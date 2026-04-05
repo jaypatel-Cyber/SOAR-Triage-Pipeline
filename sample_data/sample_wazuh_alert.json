@@ -1,0 +1,54 @@
+{
+  "_comment": "Sample Wazuh alert — SSH brute force followed by successful login (Rule 100101, Level 14)",
+  "_comment2": "This is the raw format Wazuh writes to disk before custom-n8n.py processes it",
+
+  "id": "1710545872.156849",
+  "timestamp": "2024-03-15T23:47:52.641+0000",
+  "manager": {
+    "name": "wazuh-manager"
+  },
+  "agent": {
+    "id": "003",
+    "name": "ubuntu-prod-01",
+    "ip": "10.0.1.10"
+  },
+  "location": "/var/log/auth.log",
+  "decoder": {
+    "name": "sshd",
+    "parent": "sshd"
+  },
+  "rule": {
+    "id": "100101",
+    "level": 14,
+    "description": "CRITICAL: Successful SSH login from 185.220.101.45 after brute force — possible credential stuffing or compromise of jsmith",
+    "groups": [
+      "authentication_success",
+      "brute_force",
+      "credential_stuffing",
+      "soar_trigger"
+    ],
+    "mitre": {
+      "id": ["T1110.004", "T1078"],
+      "tactic": ["Credential Access", "Defense Evasion"],
+      "technique": ["Credential Stuffing", "Valid Accounts"]
+    },
+    "frequency": 7,
+    "timeframe": 120
+  },
+  "data": {
+    "srcip": "185.220.101.45",
+    "dstuser": "jsmith",
+    "dsthost": "ubuntu-prod-01",
+    "protocol": "ssh2",
+    "srcport": "54328"
+  },
+  "full_log": "Mar 15 23:47:01 ubuntu-prod-01 sshd[4891]: Accepted password for jsmith from 185.220.101.45 port 54328 ssh2",
+  "input": {
+    "type": "log"
+  },
+  "predecoder": {
+    "program_name": "sshd",
+    "timestamp": "Mar 15 23:47:01",
+    "hostname": "ubuntu-prod-01"
+  }
+}

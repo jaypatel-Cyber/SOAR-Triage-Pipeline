@@ -1,0 +1,7 @@
+#!/bin/bash
+# Wazuh integration wrapper — calls the Python integration script
+# Must be executable: chmod 750 /var/ossec/integrations/custom-n8n
+# Ownership: chown root:wazuh /var/ossec/integrations/custom-n8n
+
+SCRIPT_DIR="$(dirname "$0")"
+/usr/bin/python3 "$SCRIPT_DIR/custom-n8n.py" "$@"
