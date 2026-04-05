@@ -1,4 +1,4 @@
-# Project 2: Fully Automated SOAR Triage Pipeline
+# Fully Automated SOAR Triage Pipeline
 
 **Role Focus:** SOC Analyst · Security Automation Engineer
 
